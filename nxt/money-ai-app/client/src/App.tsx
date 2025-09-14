@@ -129,6 +129,21 @@ const App = () => {
 };
 
 
+// --- MOCK DATABASE ---
+const mockPayments: Payment[] = [
+    { id: 'pay_OgbHe2b93Y2fCq', amount: 2000, status: 'captured', created_at: 1723469882, method: 'Card', email: 'customer1@example.com', contact: '9999999999' },
+    { id: 'pay_OgbHe2c98Y2dDr', amount: 1500, status: 'captured', created_at: 1723469582, method: 'UPI', email: 'user2@test.dev', contact: '9999999999' },
+    { id: 'pay_OgbHe2d99Y2eEs', amount: 3500, status: 'failed', created_at: 1723469282, method: 'Card', email: 'contact@acme.inc', contact: '9999999999' },
+    { id: 'pay_OgbHe2e90Y2fFt', amount: 500, status: 'created', created_at: 1723468982, method: 'Card', email: 'new.customer@web.com', contact: '9999999999' },
+    { id: 'pay_OgbHe2f91Y2gGu', amount: 8000, status: 'captured', created_at: 1723468682, method: 'UPI', email: 'another.user@mail.io', contact: '9999999999' },
+];
+
+const mockLoans: LoanReminder[] = [
+    { id: 'loan_1', name: 'Home Loan', amount: 25000, dueDate: '2025-09-30' },
+    { id: 'loan_2', name: 'Car EMI', amount: 12000, dueDate: '2025-10-15' },
+];
+
+
 // --- AI ASSISTANT COMPONENT ---
 const AiAssistant = () => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -146,21 +161,77 @@ const AiAssistant = () => {
 
         const userMessage: ChatMessage = { role: 'user', text: input };
         setMessages(prev => [...prev, userMessage]);
+        const currentInput = input;
         setInput('');
         setIsLoading(true);
 
         try {
-            const responseData = await api.post('/openai/chat', { prompt: input });
-            const modelResponse = responseData.choices[0].message.content;
-            const modelMessage: ChatMessage = { role: 'model', text: modelResponse };
-            setMessages(prev => [...prev, modelMessage]);
+            const processedResponse = await processAiQuery(currentInput);
+            if (processedResponse) {
+                setMessages(prev => [...prev, { role: 'model', text: processedResponse }]);
+            } else {
+                const responseData = await api.post('/openai/chat', { prompt: currentInput });
+                const modelResponse = responseData.choices[0].message.content;
+                const modelMessage: ChatMessage = { role: 'model', text: modelResponse };
+                setMessages(prev => [...prev, modelMessage]);
+            }
         } catch (error) {
             console.error("Error communicating with AI:", error);
-            const errorMessage: ChatMessage = { role: 'model', text: "Sorry, I'm having trouble connecting. Please try again later." };
+            const errorMessage: ChatMessage = { role: 'model', text: "Sorry, I'm having trouble connecting to the AI. Please try again later." };
             setMessages(prev => [...prev, errorMessage]);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const processAiQuery = async (query: string): Promise<string | null> => {
+      const lowerCaseQuery = query.toLowerCase();
+
+      // Check for keywords for balance or total payments
+      if (lowerCaseQuery.includes('balance') || lowerCaseQuery.includes('total payments')) {
+        const totalRevenue = mockPayments
+          .filter(p => p.status === 'captured')
+          .reduce((sum, p) => sum + p.amount, 0);
+        return `Your total captured payments amount to ₹${(totalRevenue / 100).toLocaleString()}.`;
+      }
+
+      // Check for keywords for failed payments
+      if (lowerCaseQuery.includes('failed payments')) {
+        const failedPayments = mockPayments.filter(p => p.status === 'failed').length;
+        return `You have had ${failedPayments} payments that failed.`;
+      }
+
+      // Check for keywords for upcoming loans
+      if (lowerCaseQuery.includes('upcoming loans') || lowerCaseQuery.includes('loan reminder')) {
+        if (mockLoans.length === 0) {
+          return "You don't have any upcoming loan reminders. You can add one in the 'Loan Reminders' tab.";
+        }
+        const loansList = mockLoans.map(loan => {
+          return `- ${loan.name}: ₹${loan.amount.toLocaleString()} due on ${loan.dueDate}`;
+        });
+        return `Here are your upcoming loan reminders:\n${loansList.join('\n')}`;
+      }
+      
+      // Check for specific transactions by name (simple keyword search)
+      if (lowerCaseQuery.includes('paid to')) {
+          const recipient = lowerCaseQuery.split('paid to')[1]?.trim();
+          if (!recipient) {
+              return "Please specify who you paid. For example: 'how much did i paid to new.customer@web.com?'";
+          }
+          
+          const transactionsFound = mockPayments.filter(p => p.email.toLowerCase().includes(recipient) || p.contact.toLowerCase().includes(recipient));
+          
+          if(transactionsFound.length > 0) {
+              const transactionsList = transactionsFound.map(p => 
+                  `- ID: ${p.id}, Amount: ₹${p.amount / 100}, Status: ${p.status}, Paid To: ${p.email}`
+              );
+              return `Here are the transactions found for "${recipient}":\n${transactionsList.join('\n')}`;
+          } else {
+              return `I couldn't find any payments to "${recipient}".`;
+          }
+      }
+
+      return null;
     };
 
     return (
@@ -210,7 +281,7 @@ const AiAssistant = () => {
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="e.g., How many payments failed today?"
+                        placeholder="e.g., How much did I pay to new.customer@web.com?"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
                         disabled={isLoading}
                     />
@@ -340,24 +411,23 @@ const PaymentDashboard = () => {
   const [stats, setStats] = useState({ totalRevenue: 0, successfulPayments: 0, failedPayments: 0, pendingPayments: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchPayments = useCallback(async (showSpinner: boolean) => {
-    if (showSpinner) setIsLoading(true);
-    try {
-      const data = await api.get('/razorpay/payments');
-      setPayments(data.items || []);
-    } catch (error) {
-      console.error("Failed to fetch payments:", error);
-      setPayments([]);
-    } finally {
-      if (showSpinner) setIsLoading(false);
-    }
-  }, []);
-
+  // This is a local state polling mechanism to simulate real-time updates.
   useEffect(() => {
-    // initial load
-    fetchPayments(true);
-    // poll every 10s for near real-time updates
-    const intervalId = setInterval(() => fetchPayments(false), 10000);
+    const fetchPayments = async () => {
+      try {
+        const data = await api.get('/razorpay/payments');
+        setPayments(data.items || []);
+      } catch (error) {
+        console.error("Failed to fetch payments:", error);
+        setPayments([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPayments();
+    const intervalId = setInterval(fetchPayments, 10000); // Poll every 10 seconds for new payments
+
     // websocket for instant updates
     const socket = createSocket('http://localhost:3000', { transports: ['websocket'] });
     socket.on('connect', () => {
@@ -365,16 +435,17 @@ const PaymentDashboard = () => {
     });
     socket.on('payment:verified', () => {
       // immediately refresh on verified payment
-      fetchPayments(false);
+      fetchPayments();
     });
     socket.on('disconnect', () => {
       // no-op
     });
+
     return () => {
       clearInterval(intervalId);
       try { socket.disconnect(); } catch {}
     };
-  }, [fetchPayments]);
+  }, []);
 
   useEffect(() => {
     const totalRevenue = payments
@@ -445,7 +516,7 @@ const PaymentDashboard = () => {
             </div>
           ) : (
             <div className="space-y-2">
-              {payments.map((payment) => (
+              {payments.length > 0 ? payments.map((payment) => (
                 <div key={payment.id} className="flex items-center justify-between p-4 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex items-center space-x-4">
                     <div className={`p-2 rounded-full ${getStatusColor(payment.status)}`}>
@@ -461,7 +532,9 @@ const PaymentDashboard = () => {
                     <p className="text-xs text-gray-500">{new Date(payment.created_at * 1000).toLocaleString()}</p>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <p className="text-center text-gray-500">No transactions found.</p>
+              )}
             </div>
           )}
         </div>
@@ -617,3 +690,4 @@ const PaymentInterface = () => {
 };
 
 export default App;
+
