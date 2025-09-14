@@ -17,7 +17,7 @@ function RazorpayButton() {
 
   const handlePayment = () => {
     const options = {
-      key: 'rzp_test_1gQdsGq0gzNDmo', // Replace with your Razorpay Key ID
+      key: 'your_id', // Replace with your Razorpay Key ID
       amount: 50000, // Amount in paise (e.g., ₹500)
       currency: 'INR',
       name: 'Demo Payment',
@@ -28,7 +28,7 @@ function RazorpayButton() {
       prefill: {
         name: 'Likhith Imandi',
         email: 'ilikhith2007@gmail.com',
-        contact: '7981237980'
+        contact: '1231231230'
       },
       theme: {
         color: '#3399cc'
